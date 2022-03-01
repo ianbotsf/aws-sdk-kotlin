@@ -12,6 +12,11 @@ tasks.register("javadocJar", Jar) {
     from()
 }
 
+def nameSuffix = ""
+if (project.hasProperty("codegen.artifactHash")) {
+    nameSuffix = "-" + project.property("codegen.artifactHash").toString()
+}
+
 publishing {
     repositories {
         maven { name = "testLocal"; url = "$rootProject.buildDir/m2" }
@@ -28,7 +33,13 @@ publishing {
     publications.all {
         project.afterEvaluate {
             pom {
-                name = project.name
+                if (project.path.startsWith(":services:")) {
+                    name = project.name + nameSuffix
+                    artifactId = project.name + nameSuffix
+                } else {
+                    name = project.name
+                }
+
                 description = project.description
                 url = "https://github.com/awslabs/aws-sdk-kotlin"
                 licenses {

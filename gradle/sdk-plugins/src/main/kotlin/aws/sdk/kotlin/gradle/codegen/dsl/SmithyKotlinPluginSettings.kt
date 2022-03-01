@@ -28,6 +28,18 @@ class SmithyKotlinBuildSettings : ToNode {
     }
 }
 
+class SmithyKotlinCodegenSettings : ToNode {
+    var dataClasses: Boolean? = null
+    var boxRequiredMembers: Boolean? = null
+
+    override fun toNode(): Node {
+        val builder = ObjectNode.objectNodeBuilder()
+        builder.withNullableMember("dataClasses", dataClasses)
+        builder.withNullableMember("boxRequiredMembers", boxRequiredMembers)
+        return builder.build()
+    }
+}
+
 class SmithyKotlinPluginSettings : SmithyBuildPlugin {
     override val pluginName: String = "kotlin-codegen"
 
@@ -43,6 +55,12 @@ class SmithyKotlinPluginSettings : SmithyBuildPlugin {
         buildSettings!!.apply(configure)
     }
 
+    internal var codegenSettings: SmithyKotlinCodegenSettings? = null
+    fun codegenSettings(configure: SmithyKotlinCodegenSettings.() -> Unit) {
+        if (codegenSettings == null) codegenSettings = SmithyKotlinCodegenSettings()
+        codegenSettings!!.apply(configure)
+    }
+
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (javaClass != other?.javaClass) return false
@@ -55,6 +73,7 @@ class SmithyKotlinPluginSettings : SmithyBuildPlugin {
         if (packageDescription != other.packageDescription) return false
         if (sdkId != other.sdkId) return false
         if (buildSettings != other.buildSettings) return false
+        if (codegenSettings != other.codegenSettings) return false
 
         return true
     }
@@ -66,6 +85,7 @@ class SmithyKotlinPluginSettings : SmithyBuildPlugin {
         result = 31 * result + (packageDescription?.hashCode() ?: 0)
         result = 31 * result + (sdkId?.hashCode() ?: 0)
         result = 31 * result + (buildSettings?.hashCode() ?: 0)
+        result = 31 * result + (codegenSettings?.hashCode() ?: 0)
         return result
     }
 
@@ -79,6 +99,7 @@ class SmithyKotlinPluginSettings : SmithyBuildPlugin {
             }
             .withNullableMember("sdkId", sdkId)
             .withNullableMember("build", buildSettings)
+            .withNullableMember("codegen", codegenSettings)
 
         return obj.build()
     }

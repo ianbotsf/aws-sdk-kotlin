@@ -50,6 +50,23 @@ fun getProperty(name: String): String? {
     return null
 }
 
+sealed class OperationsSelection {
+    object AllOperations : OperationsSelection()
+    data class SpecificOperations(val ops: Set<String>) : OperationsSelection()
+}
+
+data class CodegenOptions(
+    val dataClasses: Boolean = false,
+    val boxRequiredMembers: Boolean = true,
+)
+
+// FIXME Cannot be in CodegenOptions companion object because that's effectively static and there's no `project` ref
+// in scope. See https://github.com/gradle/gradle/issues/16623
+fun codegenOptionsFromProperties(): CodegenOptions = CodegenOptions(
+    dataClasses = getProperty("codegen.dataClasses")?.toBoolean() == true,
+    boxRequiredMembers = getProperty("codegen.boxRequiredMembers")?.toBoolean() != false,
+)
+
 // Represents information needed to generate a smithy projection JSON stanza
 data class AwsService(
     /**
@@ -91,6 +108,9 @@ data class AwsService(
      */
     val description: String? = null,
 
+    val operationsSelection: OperationsSelection,
+
+    val codegenOptions: CodegenOptions,
 )
 
 
@@ -132,6 +152,10 @@ fun awsServiceProjections(): Provider<List<SmithyProjection>> {
                         generateFullProject = false
                         generateDefaultBuildFiles = false
                     }
+                    codegenSettings {
+                        dataClasses = service.codegenOptions.dataClasses
+                        boxRequiredMembers = service.codegenOptions.boxRequiredMembers
+                    }
                 }
             }
         }
@@ -157,11 +181,41 @@ codegen.projections.addAllLater(awsServiceProjections())
  * Example: renameShapes-MarketplaceCommerceAnalyticsException.json
  */
 fun transformsForService(service: AwsService): List<String>? {
+    val operationFilterTransform = when (val ops = service.operationsSelection) {
+        is OperationsSelection.SpecificOperations -> {
+            val opsAsJsonArray = ops.ops.joinToString(
+                separator = ", ",
+                prefix = "[",
+                postfix = "]"
+            ) {
+                "\"$it\""
+            }
+            """
+              {
+                "name": "awsSdkKotlinIncludeOperations",
+                "args": {
+                  "operations": $opsAsJsonArray
+                }
+              }
+            """.trimIndent()
+        }
+        else -> null
+    }
+
     val transformsDir = File(service.transformsDir)
     return transformsDir.listFiles()?.map { transformFile ->
         transformFile.readText()
-    }
+    }.appendNotNull(operationFilterTransform)
 }
+
+fun <T> List<T>?.appendNotNull(other: T?): List<T> =
+    if (this == null) {
+        listOfNotNull(other)
+    } else if (other == null) {
+        this
+    } else {
+        this + other!!
+    }
 
 val discoveredServices: List<AwsService> by lazy { discoverServices() }
 // The root namespace prefix for SDKs
@@ -177,6 +231,13 @@ fun discoverServices(applyFilters: Boolean = true): List<AwsService> {
     val modelsDir: String by project
     val serviceMembership = parseMembership(getProperty("aws.services"))
     val protocolMembership = parseMembership(getProperty("aws.protocols"))
+
+    val operationsSelection = if (hasProperty("aws.service.operations")) {
+        val operationsMembership = parseMembership(getProperty("aws.service.operations")).also {
+            require(it.exclusions.isEmpty()) { "aws.service.operations does not support exclusions (inclusions only)"}
+        }
+        OperationsSelection.SpecificOperations(operationsMembership.inclusions)
+    } else OperationsSelection.AllOperations
 
     return fileTree(project.file(modelsDir))
         .filter { file ->
@@ -231,7 +292,9 @@ fun discoverServices(applyFilters: Boolean = true): List<AwsService> {
                 projectionName = name + "." + version.toLowerCase(),
                 sdkId = serviceApi.sdkId,
                 version = service.version,
-                description = description
+                description = description,
+                operationsSelection = operationsSelection,
+                codegenOptions = codegenOptionsFromProperties(),
             )
         }
 }
